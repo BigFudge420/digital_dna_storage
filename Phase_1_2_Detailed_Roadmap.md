@@ -143,25 +143,17 @@ Enhance the simulation pipeline by adding sequencing read alignment, establishin
 dna_storage_capstone/
 ├── README.md
 ├── requirements.txt
+├── resources/
 ├── src/
-│   ├── __init__.py
-│   ├── codecs/
-│   │   ├── naive.py
-│   │   └── goldman.py
-│   ├── ecc/
-│   │   └── rs_codec.py
-│   ├── validators/
-│   │   └── sequence_rules.py
-│   ├── simulator/
-│   │   └── channel.py
-│   ├── consensus/
-│   │   └── voter.py
-│   └── dashboard/
-│       ├── app.py
-│       └── templates/
-│           └── index.html
-├── benchmarks/
-│   └── run_suite.py
-└── tests/
-    └── test_pipeline.py
+    ├── __init__.py
+    ├── codecs/
+    │   └── ...
+    ├── ecc/
+    │   └── ...
+    ├── validators/
+    │   └── ...
+    ├── simulator/
+    │   └── ...
+    ├── consensus/
+        └── ...
 ```
