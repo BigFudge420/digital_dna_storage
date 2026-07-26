@@ -65,6 +65,13 @@ Survey of existing simulators — steal the channel-design choices instead of in
 
 ---
 
+## 6 · Read consensus (`consensus`)
+**Vaser, Sović, Nagarajan & Šikić (2017). "Fast and accurate de novo genome assembly from long uncorrected reads."** *Genome Research* 27:737–746.
+The **Racon** consensus/polishing method — reconstruct one accurate sequence from many noisy long reads. The reference for your `consensus` module's align-then-vote step; your majority-vote MVP is the lightweight version of this.
+- DOI 10.1101/gr.214270.116 · Source: https://github.com/isovic/racon
+
+---
+
 ## Reading path in one line
 Ceze review → Church (baseline) → Goldman (constraint-aware codec) → Grass (RS) → MESA (error model) → *then optionally* Erlich (fountain) + Bornholt (systems framing) for the report.
 
