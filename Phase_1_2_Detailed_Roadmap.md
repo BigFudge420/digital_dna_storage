@@ -1,159 +1,123 @@
-# Digital DNA Storage: Capstone Project Execution Roadmap (Phase 1 & 2)
+# Detailed 14-Day Execution Roadmap
 
-**Academic Level:** Undergraduate College Capstone / Final Year Project (2 Semesters, ~8 Months)  
-**Project Title:** Design and Simulation of a DNA-Based Key-Value Data Archival System  
-**Focus:** Implementation of DNA encoding algorithms, error correction, stochastic mutation simulation, and a diagnostic web dashboard.
-
----
-
-## Capstone Project Overview
-This roadmap is tailored for a final year undergraduate engineering or biotechnology team. The goal is to build an end-to-end software simulation of digital DNA storage. Instead of utilizing complex production-grade deep learning or high-complexity custom convolution codes, this curriculum employs robust standard libraries (such as `scipy`, `numpy`, and pure Python arithmetic) combined with lightweight consensus algorithms.
+**Project:** Design and Simulation of a DNA-Based Data Archival System
+**Scope:** 2-week software MVP. Libraries over hand-rolling (`reedsolo`, `numpy`); majority-vote consensus, not a production aligner; fountain codes + web dashboard = stretch.
+**Owners:** **F** = friend (codec layer) · **I** = Isaac (simulator + pipeline).
 
 ```
-   ┌─────────────────────────────────────────────────────────────────────────┐
-   │                     SEMESTER 1: PHASE 1 (Months 1–4)                    │
-   │        Core Codec Pipeline, Bio-Filters & Error Channel Simulator       │
-   └────────────────────────────────────┬────────────────────────────────────┘
-                                        │
-                                        ▼
-   ┌─────────────────────────────────────────────────────────────────────────┐
-   │                     SEMESTER 2: PHASE 2 (Months 5–8)                    │
-   │       Read Consensus Decoding, Benchmarking Suite & Web Dashboard       │
-   └─────────────────────────────────────────────────────────────────────────┘
+   ┌──────────────────────────────────────────────────────────────┐
+   │  WEEK 1 · Days 1–7   Core Round-Trip + CI                    │
+   └───────────────────────────────┬──────────────────────────────┘
+                                   ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │  WEEK 2 · Days 8–14  Robustness, Consensus & Analysis        │
+   └──────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-# SEMESTER 1 — PHASE 1: Core Simulation & Coding Pipeline (Months 1–4)
+# WEEK 1 — Core Round-Trip (Days 1–7)
 
-### **Objective**
-Establish the fundamental coding pipeline. By the end of Semester 1, the team will have a working Command-Line Interface (CLI) that takes arbitrary digital files, encodes them into synthetically valid DNA sequences, simulates degradation/sequencing noise, and decodes the files back error-free using Reed-Solomon protection.
+**Objective:** a CLI that encodes a real file into valid DNA, simulates noise, and decodes it back error-free — gated by a round-trip CI test. The spine (framing + pipeline + naive + test + CI) needs nothing from the codec beyond `naive`, which is already done, so Week 1 cannot be blocked by the codec track.
 
----
+## Day 1 — Repo hygiene + framing start *(I)*
+- `.gitignore` (+ untrack committed `__pycache__`), empty `conftest.py`, branch `isaac-simulator`.
+- Start `src/framing.py`: `chunk(data, payload_size) -> [(index, payload)]`.
+- **Deliverable:** clean repo; `framing.chunk`/`unchunk` stubbed with a unit test.
 
-## Month 1: Project Setup & Baseline DNA Mappers
-- **Goals:**
-  - Define file structure, version control (Git), and select Python 3.10+ as the core language.
-  - Implement a binary-to-base converter mapping 2 bits per base (`00` $\rightarrow$ A, `01` $\rightarrow$ C, `10` $\rightarrow$ G, `11` $\rightarrow$ T).
-  - Implement the **Goldman et al. (2013)** rotating ternary mapping matrix (prevents homopolymers by choosing base options relative to the previous base: $L_{homo} = 1$).
-- **Methodology & Citations:**
-  - Follow the rotating base conversion principles described in *Goldman et al. (2013, Nature)*.
-- **Deliverables:**
-  - Modules: `src/codecs/naive.py` and `src/codecs/goldman.py` (`encode` and `decode` functions).
-  - Unit tests verifying exact roundtrip recovery for small text files.
+## Day 2 — Codec + framing *(F + I)*
+- **F:** `goldman.py` encode/decode (naive already done). Unit tests, 100% roundtrip.
+- **I:** finish `framing.py` — `unchunk` reorders by index, strips padding.
+- **Deliverable:** framing round-trips; codec module tested.
 
----
+## Day 3 — Pipeline on naive + validator *(I + F)*
+- **I:** `pipeline.py` `encode_file`/`decode_file` wired on **naive only** (no RS/noise yet), `codec=` param.
+- **F:** `sequence_rules.py` — GC 40–60% + homopolymer ≤ 3, returns metrics.
+- **Deliverable:** file → strands → file (no noise) round-trips.
 
-## Month 2: Biological Constraint Validator
-- **Goals:**
-  - Implement a validator to evaluate whether generated DNA sequences satisfy physical synthesis requirements:
-    - **GC-Content Checker:** Target range $40\% - 60\%$.
-    - **Homopolymer Run Length Check:** Prevent sequences containing repeat runs $>3$ consecutive identical bases.
-  - Design a payload index/addressing format (framing) so that multiple strands can be reassembled in the correct order.
-- **Methodology & Citations:**
-  - Model sequence criteria based on commercial array synthesis constraints from *Twist Bioscience* and *Integrated DNA Technologies (IDT)*.
-- **Deliverables:**
-  - Module: `src/validators/sequence_rules.py` containing a `SequenceValidator` class returning pass/fail flags and diagnostic metrics (GC %, max homopolymer length).
+## Day 4 — No-noise round-trip test + CI *(I)* — 🏁 MILESTONE
+- `tests/test_roundtrip.py`: SHA-256 of input == output on a real file.
+- `.github/workflows/ci.yml`: run `pytest` on push / PR.
+- **Deliverable:** **green CI + naive round-trip.**
 
----
+## Day 5 — Channel: substitution + loss *(I)*
+- `channel.py` → `simulate_noise(seqs, sub_prob, ind_prob, num_reads=10, seed=None) -> list[list[str]]`.
+- Substitution + whole-strand loss first; seeded.
+- **Deliverable:** reproducible noisy reads, multiple copies per strand.
 
-## Month 3: Error Correcting Code (ECC) Layer
-- **Goals:**
-  - Integrate an algebraic error-correcting code to protect against base mutations.
-  - Use Python's standard libraries or a lightweight Galois Field package to implement a block-level **Reed-Solomon (RS)** encoder and decoder.
-- **Methodology & Citations:**
-  - Reference *Grass et al. (ETH Zurich, 2015, Angew. Chem.)* for using RS codes over finite fields to correct base substitution errors and strand losses.
-- **Deliverables:**
-  - Module: `src/ecc/rs_codec.py` integrating Reed-Solomon parity generation.
-  - Demonstration script showing recovery of data with up to $10\%$ corrupted bytes.
+## Day 6 — Channel: indels + RS integrate *(I + F)*
+- **I:** add insertion/deletion to the channel.
+- **F:** `rs_codec.py` via `reedsolo`; `decode_rs` returns `(bytes, n_corrected)` or raises on uncorrectable.
+- **Deliverable:** channel complete; RS available to the pipeline.
+
+## Day 7 — Buffer / first noisy round-trip *(I)*
+- Plug RS into the pipeline; run file → RS → naive → noise → decode end-to-end.
+- **Deliverable:** noisy pipeline runs (recovery quality lands with consensus in Week 2).
 
 ---
 
-## Month 4: Stochastic DNA Mutation Simulator (Semester 1 Milestone)
-- **Goals:**
-  - Construct a noise simulator modeling the biological storage channel:
-    - Substitution probability ($P_{sub}$).
-    - Deletion probability ($P_{del}$) and Insertion probability ($P_{ins}$).
-    - Complete strand loss (erasure rate).
-  - Test the entire pipeline: **File $\rightarrow$ RS ECC $\rightarrow$ Goldman Encoding $\rightarrow$ Mutation Noise $\rightarrow$ Decoding $\rightarrow$ Recovery**.
-- **Methodology & Citations:**
-  - Model error rates based on sequencing profile distributions in the Microsoft/UW ASPLOS 2016 paper (*Bornholt et al.*).
-- **Deliverables:**
-  - Module: `src/simulator/channel.py`.
-  - **Semester 1 Final Presentation:** A working CLI pipeline that encodes, simulates noise, decodes, and measures data recovery success rates.
+# WEEK 2 — Robustness, Consensus & Analysis (Days 8–14)
+
+## Day 8 — Consensus core *(I)*
+- `consensus/alignment.py`: group reads by index, majority vote (substitution / loss).
+- **Deliverable:** clean strand from a noisy read pool.
+
+## Day 9 — Indels + noisy test passes *(I)* — 🏁 MILESTONE
+- Align-before-vote for indels (**or descope indels** if time-boxed).
+- `test_roundtrip_with_noise`: file survives the channel, SHA-256 match.
+- **Deliverable:** **recovers under noise.**
+
+## Day 10 — Benchmark suite *(I)*
+- `benchmarks/run_suite.py`: recovery-vs-noise curve, naive vs Goldman, bits/nt. Add `matplotlib` to `requirements.txt`.
+- **Deliverable:** the decision plot.
+
+## Day 11 — Hardening *(both)*
+- Edge cases, more tests, docstrings, README polish.
+
+## Day 12 — Stretch: dashboard or polish *(optional)*
+- Optional Streamlit: file upload + noise slider + accuracy chart. Descope-able.
+
+## Day 13 — Write-up + resources *(both)*
+- Results, plots, papers into `resources/`.
+
+## Day 14 — Demo + release *(both)*
+- Final demo, tag `v0.1`, repo cleanup.
 
 ---
 
-# SEMESTER 2 — PHASE 2: Visualization, Consensus & Analysis (Months 5–8)
-
-### **Objective**
-Enhance the simulation pipeline by adding sequencing read alignment, establishing a comparative benchmarking engine, and building an interactive web dashboard for project demonstration.
-
----
-
-## Month 5: Read Consensus Reconstruction
-- **Goals:**
-  - Implement a consensus decoder. Since sequencing yields multiple noisy reads of the same strand, implement a consensus algorithm to rebuild the original sequence:
-    - Group reads by index/address ID.
-    - Implement a **Majority-Vote Consensus** algorithm (align reads using pairwise Levenshtein distance and select the most frequent base at each position to filter insertion/deletion noise).
-- **Methodology & Citations:**
-  - Reference consensus assembly strategies detailed in Oxford Nanopore read reconstruction pipelines (*Vaser et al., 2017*).
-- **Deliverables:**
-  - Module: `src/consensus/voter.py` returning high-fidelity consensus sequences from a pool of noisy reads.
-
----
-
-## Month 6: Web Dashboard Development
-- **Goals:**
-  - Build an interactive graphical user interface (GUI) to showcase the project:
-    - **Backend:** Flask or FastAPI app serving as an API.
-    - **Frontend:** HTML5/CSS3 dashboard (or a Streamlit/React application).
-    - **Features:** File upload, selector for encoding algorithms (Naive vs. Goldman), slider to adjust simulated error rates, and visual charts showing GC distribution, mutation locations, and decoding accuracy.
-- **Deliverables:**
-  - Sub-directory: `src/dashboard/` containing app routing and visual widgets.
-
----
-
-## Month 7: Benchmarking & Evaluation Suite
-- **Goals:**
-  - Run systematic comparative benchmarks:
-    - Compare Naive 2-bit mapping against Goldman rotating codes.
-    - Measure Net Logical Density ($\text{bits per nucleotide}$).
-    - Record execution runtimes for encoding and decoding stages.
-    - Plot decoding recovery rate against increasing simulation noise ($0\%$ to $15\%$ base error rates).
-- **Deliverables:**
-  - Script: `benchmarks/run_suite.py` producing diagnostic plots (using `matplotlib` or `seaborn`).
-
----
-
-## Month 8: Project Thesis, Poster, and Final Defense
-- **Goals:**
-  - Compile the final capstone project thesis report.
-  - Design a project poster highlighting the architecture, simulation results, and dashboard UI.
-  - Final project demonstration and defense before the academic committee.
-- **Deliverables:**
-  - Completed Capstone Project Thesis document (PDF).
-  - Open-Source GitHub repository containing clean, documented code and instructions to launch the dashboard.
-
----
-
-## Capstone Project Directory Tree
+## Updated Directory Tree
 
 ```text
-dna_storage_capstone/
+digital_dna_storage/
+├── .gitignore
+├── conftest.py
 ├── README.md
 ├── requirements.txt
+├── Digital_DNA_Storage_Research_Report.md
+├── Digital_DNA_Storage_Roadmap.md
+├── Phase_1_2_Detailed_Roadmap.md
+├── .github/
+│   └── workflows/
+│       └── ci.yml
 ├── resources/
-├── src/
+│   └── reading-list.md
+├── benchmarks/
+│   └── run_suite.py          # I  (Day 10)
+├── tests/
+│   └── test_roundtrip.py     # I
+└── src/
     ├── __init__.py
+    ├── pipeline.py           # I  — integrator
+    ├── framing.py            # I  — chunk / index
     ├── codecs/
-    │   └── ...
+    │   ├── naive.py          # F  (done)
+    │   └── goldman.py        # F
     ├── ecc/
-    │   └── ...
+    │   └── rs_codec.py       # F
     ├── validators/
-    │   └── ...
+    │   └── sequence_rules.py # F
     ├── simulator/
-    │   └── ...
-    ├── consensus/
-        └── ...
+    │   └── channel.py        # I
+    └── consensus/
+        └── alignment.py      # I
 ```
