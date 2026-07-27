@@ -38,7 +38,10 @@ def encode(data: bytes) -> str:
     Returns:
         str: Encoded DNA nucleotide sequence containing 'A', 'C', 'G', and 'T'.
     """
-    SEQUENCE = []
+    # Accumulator list for encoded nucleotide characters
+    SEQUENCE: list[str] = []
+
+    # Iterate through each byte in the input byte stream
     for byte in data:
         # Extract 2-bit pairs from most significant (bits 7-6) to least significant (bits 1-0)
         SEQUENCE.append(NUCLEOTIDE_MAP[(byte >> 6) & 0b11])  # Bits 7-6
@@ -46,6 +49,7 @@ def encode(data: bytes) -> str:
         SEQUENCE.append(NUCLEOTIDE_MAP[(byte >> 2) & 0b11])  # Bits 3-2
         SEQUENCE.append(NUCLEOTIDE_MAP[byte & 0b11])         # Bits 1-0
 
+    # Join the accumulated nucleotide characters into a single string
     return "".join(SEQUENCE)
 
 
@@ -67,16 +71,21 @@ def decode(dna_sequence: str) -> bytes:
     if len(dna_sequence) % 4 != 0:
         raise ValueError("DNA Sequence length should be a multiple of 4!")
 
-    byte_array = bytearray()
+    # Byte array to store the reconstructed raw bytes
+    byte_array: bytearray = bytearray()
+
+    # Process nucleotides in groups of 4 (representing 1 byte each)
+    i: int
     for i in range(0, len(dna_sequence), 4):
         # Look up 2-bit integer values for each group of 4 nucleotides
-        b1 = REVERSE_NUCLEOTIDE_MAP[dna_sequence[i].upper()]
-        b2 = REVERSE_NUCLEOTIDE_MAP[dna_sequence[i+1].upper()]
-        b3 = REVERSE_NUCLEOTIDE_MAP[dna_sequence[i+2].upper()]
-        b4 = REVERSE_NUCLEOTIDE_MAP[dna_sequence[i+3].upper()]
+        b1: int = REVERSE_NUCLEOTIDE_MAP[dna_sequence[i].upper()]
+        b2: int = REVERSE_NUCLEOTIDE_MAP[dna_sequence[i+1].upper()]
+        b3: int = REVERSE_NUCLEOTIDE_MAP[dna_sequence[i+2].upper()]
+        b4: int = REVERSE_NUCLEOTIDE_MAP[dna_sequence[i+3].upper()]
 
         # Reconstruct the original 8-bit byte value by bitwise shifting and OR operations
-        byte_val = (b1 << 6) | (b2 << 4) | (b3 << 2) | b4
+        byte_val: int = (b1 << 6) | (b2 << 4) | (b3 << 2) | b4
         byte_array.append(byte_val)
 
+    # Convert bytearray back to immutable bytes object
     return bytes(byte_array)
