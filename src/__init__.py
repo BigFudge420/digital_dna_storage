@@ -1,3 +1,0 @@
-"""
-Digital DNA Storage Package
-"""

@@ -1,3 +1,0 @@
-"""
-Consensus & Read Alignment Package
-"""
