@@ -1,1 +1,1 @@
-# conftest.py — its existence puts the repo root on sys.path so tests can `import src.*`
+# conftest.py — its existence puts the backernd/ on sys.path so tests can `import src.*`
