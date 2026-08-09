@@ -16,6 +16,12 @@ Or edit the constants below and re-run.
 import sys
 from itertools import groupby
 
+# The rules and headings below are box-drawing characters. On Windows stdout
+# defaults to cp1252 whenever it is not a console (piped to a file, captured by
+# CI), and printing them there raises UnicodeEncodeError before any output.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 sys.path.insert(0, ".")
 from src.framing import frame, deframe
 from src.pipeline import encode, decode
@@ -48,6 +54,27 @@ def show(dna, width=60):
 def rule(title):
     print(f"\n{'─' * 66}\n{title}\n{'─' * 66}")
 
+def count_substitutions(clean, noisy):
+    """Count positional base mismatches between the originals and the reads.
+
+    Only defined when the reads line up 1:1 with the strands they came from —
+    coverage=1 and substitution-only noise. Under coverage>1 or indels the
+    lists no longer correspond and zip() would silently truncate to the
+    shorter one, returning a plausible but meaningless number. Fail loudly.
+    """
+    if len(noisy) != len(clean):
+        raise ValueError(
+            f"{len(noisy)} reads from {len(clean)} strands — a positional diff "
+            "is undefined here (coverage > 1). Compare per-copy instead."
+        )
+    for i, (orig, read) in enumerate(zip(clean, noisy)):
+        if len(read) != len(orig):
+            raise ValueError(
+                f"strand {i}: read is {len(read)} nt, original is {len(orig)} nt "
+                "— a positional diff is undefined here (indels). Use an alignment."
+            )
+    return sum(a != b for orig, read in zip(clean, noisy) for a, b in zip(orig, read))
+
 
 rule(f"1. YOUR MESSAGE  ->  {MESSAGE!r}   ({len(MESSAGE)} bytes)")
 strands = frame(MESSAGE)
@@ -71,7 +98,7 @@ rule(f"3. NOW ADD NOISE  (sub_prob={NOISE}, seed={SEED})")
 for name, codec in (("naive", naive), ("goldman", goldman)):
     clean = encode(MESSAGE, codec=codec)
     noisy = StorageChannel(seed=SEED).simulate_noise(clean, sub_prob=NOISE)
-    hits = sum(a != b for x, y in zip(clean, noisy) for a, b in zip(x, y))
+    hits = count_substitutions(clean, noisy)
     print(f"\n{name}:  {hits} base(s) corrupted")
     try:
         out = decode(noisy, codec=codec)
