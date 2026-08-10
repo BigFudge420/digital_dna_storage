@@ -21,7 +21,7 @@ const Navbar = () => {
     const [codec, setCodec] = useState('naive')
     
     return (
-        <div style={{backgroundColor : colors.bg + '99', borderBottomColor : colors.borderStrong}} className="p-4 border-b-2 flex justify-between items-center">
+        <div style={{backgroundColor : colors.bg, borderBottomColor : colors.borderStrong}} className="p-4 border-b-2 flex justify-between items-center">
             <div className="flex gap-2">
                 <Dna color={`${colors.coral}`}/>
                 <span style={{color : colors.text}} className="uppercase text-s font-mono">NucleoDB</span>

@@ -13,8 +13,8 @@ function SelectGroup({
   return (
     <SelectPrimitive.Group
       data-slot="select-group"
-      style={{backgroundColor : colors.amethyst, color : colors.yellow}}
-      className={cn("scroll-my-1 p-1", className)}
+      style={{backgroundColor : colors.bg, color : colors.yellow}}
+      className={cn("scroll-my-1 p-1 border-none", className)}
       {...props} />
   );
 }

@@ -12,7 +12,7 @@ const StatCard = ({ title, reading, readingUnit, description, colorIndex = 0, ca
     return (
         <div 
             style={{ borderColor: borderColor, backgroundColor: bgColor, color: textColor }} 
-            className="border-2 rounded-lg flex flex-col gap-2 p-4 shadow-xl backdrop-blur-md transition-all duration-200 hover:scale-[1.03] hover:shadow-2xl"
+            className="border-2 rounded-lg flex flex-col gap-2 p-4 shadow-md transition-all duration-200 hover:scale-[1.02] hover:shadow-lg"
         >
             <div>
                 <span className="text-xs tracking-widest font-mono uppercase font-bold">{title}</span>
