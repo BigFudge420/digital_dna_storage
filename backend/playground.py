@@ -24,7 +24,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 sys.path.insert(0, ".")
 from src.framing import frame, deframe
-from src.pipeline import encode, decode
+from src.pipeline import encode, decode, roundtrip
 from src.codecs import naive, goldman
 from src.simulator.channel import StorageChannel
 
@@ -96,18 +96,10 @@ for name, codec in (("naive", naive), ("goldman", goldman)):
 
 rule(f"3. NOW ADD NOISE  (sub_prob={NOISE}, seed={SEED})")
 for name, codec in (("naive", naive), ("goldman", goldman)):
-    clean = encode(MESSAGE, codec=codec)
-    noisy = StorageChannel(seed=SEED).simulate_noise(clean, sub_prob=NOISE)
-    hits = count_substitutions(clean, noisy)
-    print(f"\n{name}:  {hits} base(s) corrupted")
-    try:
-        out = decode(noisy, codec=codec)
-        if out == MESSAGE:
-            print(f"  survived intact -> {out!r}")
-        else:
-            print(f"  CORRUPTED       -> {out!r}")
-    except Exception as e:
-        print(f"  DECODER CRASHED -> {type(e).__name__}: {e}")
+    r = roundtrip(MESSAGE, codec=codec,
+                  channel=StorageChannel(seed=SEED), sub_prob=NOISE)
+    print(f"\n{name}:  {count_substitutions(r.strands, r.reads)} base(s) corrupted")
+    print(f"  status={r.status}  ->  {r.error or r.output!r}")
 
 
 rule("4. HOW MUCH NOISE CAN EACH CODEC TAKE?")
@@ -117,16 +109,13 @@ print(f"{'-'*7}-+-{'-'*9}-+-{'-'*11}-+-{'-'*15}")
 for rate in (0.0, 0.001, 0.005, 0.01, 0.02, 0.05, 0.10):
     row = {}
     for name, codec in (("naive", naive), ("goldman", goldman)):
-        ok = crash = 0
-        for s in range(50):
-            noisy = StorageChannel(seed=s).simulate_noise(encode(MESSAGE, codec=codec), sub_prob=rate)
-            try:
-                if decode(noisy, codec=codec) == MESSAGE:
-                    ok += 1
-            except Exception:
-                crash += 1
-        row[name] = (ok, crash)
+        results = [roundtrip(MESSAGE, codec=codec,
+                             channel=StorageChannel(seed=s), sub_prob=rate)
+                   for s in range(50)]
+        row[name] = (sum(r.status == "ok"      for r in results),
+                     sum(r.status == "crashed" for r in results))
     print(f"{rate:>7.3f} | {row['naive'][0]*2:>8}% | {row['goldman'][0]*2:>10}% | {row['goldman'][1]*2:>14}%")
+
 
 print("\nThis table is the shape of PoC acceptance criterion 3 — the decode-success")
 print("curve. Once ECC and consensus exist, these columns should climb back up.\n")
