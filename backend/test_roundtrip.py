@@ -5,6 +5,7 @@ from src.pipeline import encode, decode
 
 PAYLOAD = b"Isaac -> DNA -> Isaac. " * 10
 CODECS = [naive, goldman]
+SHUFFLE_SEED = 20260817    # fixed so a failure can be replayed
 
 @pytest.mark.parametrize("codec", CODECS, ids=["naive", "goldman"])
 def test_roundtrip_is_lossless(codec):
@@ -15,5 +16,7 @@ def test_roundtrip_is_lossless(codec):
 @pytest.mark.parametrize("codec", CODECS, ids=["naive", "goldman"])
 def test_roundtrip_survives_shuffle(codec):
     strands = encode(PAYLOAD, codec=codec)
-    random.shuffle(strands)
-    assert decode(strands, codec=codec) == PAYLOAD
+    shuffled = list(strands)
+    random.Random(SHUFFLE_SEED).shuffle(shuffled)
+    assert shuffled != strands, "seed did not reorder — the test proves nothing"
+    assert decode(shuffled, codec=codec) == PAYLOAD
