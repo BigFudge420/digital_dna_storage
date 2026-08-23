@@ -44,6 +44,18 @@ def decode(reads: list[str], codec=naive) -> bytes:
     # align_and_reconstruct returns it unchanged, so there is no special case.
     aligner = ConsensusAligner()
     groups = group_by_index(reads, codec)
+
+    # A substitution inside the 8-nt header misfiles a read into a spurious index,
+    # forming a singleton bucket that would trip deframe's 0..n-1 guard and crash an
+    # otherwise-recoverable decode. Real strands cluster at the coverage depth; header
+    # noise sits at support ~1. Keep buckets with support >= half the deepest bucket.
+    # Coverage 1 -> max_support 1 -> threshold 1 -> keeps all (no-op). deframe's
+    # contiguity guard stays downstream, so wrongly dropping a real strand still
+    # crashes loud — this can never turn a crash into silent corruption.
+    if groups:
+        threshold = (max(len(v) for v in groups.values()) + 1) // 2
+        groups = {i: v for i, v in groups.items() if len(v) >= threshold}
+
     strands = [aligner.align_and_reconstruct(groups[i]) for i in sorted(groups)]
     return deframe([codec.decode(s) for s in strands])
 

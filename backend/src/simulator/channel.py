@@ -13,6 +13,14 @@ class StorageChannel:
                        ind_prob: float = 0.0,
                        drop_strand_prob: float = 0.0,
                        coverage: int = 1) -> list[str]:
+        # indels change read length, which the consensus aligner can't vote over
+        # (it needs equal-length reads). Refuse loudly rather than silently ignore
+        # ind_prob — same stance as roundtrip's noise-parameter guard.
+        if ind_prob:
+            raise NotImplementedError(
+                "ind_prob (indels) not implemented — would produce unequal-length "
+                "reads the column vote can't align; wire real alignment first"
+            )
         reads: list[str] = []
         for seq in sequences:
             # per-strand dropout: the whole strand (all its copies) is lost at once —

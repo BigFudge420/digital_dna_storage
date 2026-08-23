@@ -45,6 +45,21 @@ def test_coverage_one_is_a_consensus_no_op():
     assert decode(strands, codec=naive) == PAYLOAD
 
 
+def test_consensus_recovers_from_header_substitutions():
+    # end-to-end: at a real substitution rate a fraction of reads get a corrupted
+    # header and misfile to a garbage index. The minority-bucket filter must drop
+    # those singletons so the deep, clean buckets still reassemble the file.
+    r = roundtrip(PAYLOAD, codec=naive, channel=StorageChannel(seed=0),
+                  sub_prob=0.02, coverage=5)
+    assert r.status == "ok", f"expected recovery, got {r.status}: {r.error}"
+
+
+def test_indel_noise_is_refused_not_ignored():
+    # ind_prob is declared but not implemented — it must raise, not silently no-op.
+    with pytest.raises(NotImplementedError, match="ind_prob"):
+        StorageChannel(seed=1).simulate_noise(["ACGT"], ind_prob=0.1)
+
+
 # --- strand dropout (per-strand) ---------------------------------------------
 
 def test_dropout_is_per_strand_not_per_read():
