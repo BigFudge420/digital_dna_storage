@@ -23,21 +23,15 @@ def encode(data: bytes, payload_len: int = 32, codec=naive) -> list[str]:
 
 
 def group_by_index(reads: list[str], codec) -> dict[int, list[str]]:
-    """Bucket reads by the strand index carried in their frame header.
-
-    frame() writes the 2-byte index into the payload before the codec sees it,
-    so grouping needs no clustering and survives the uneven groups that dropout
-    creates. Failure mode: a substitution inside the index misfiles one read —
-    coverage outvotes it, and a spurious out-of-range index is caught downstream
-    by deframe's contiguity guard.
-    """
+    header_nt = len(codec.encode(b"\x00" * INDEX_SIZE))   # nt the 2-byte header occupies
     groups: dict[int, list[str]] = {}
     for read in reads:
-        # full-decode to read 2 header bytes is wasteful but O(len) — fine at PoC scale.
-        index = struct.unpack(INDEX_FMT, codec.decode(read)[:INDEX_SIZE])[0]
+        try:
+            index = struct.unpack(INDEX_FMT, codec.decode(read[:header_nt])[:INDEX_SIZE])[0]
+        except Exception:            # header unreadable (Goldman crash) — can't place it, drop it
+            continue
         groups.setdefault(index, []).append(read)
     return groups
-
 
 def decode(reads: list[str], codec=naive) -> bytes:
     # every coverage routes through consensus: coverage 1 is a one-read group and

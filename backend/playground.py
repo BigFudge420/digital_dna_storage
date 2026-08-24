@@ -8,7 +8,7 @@ survives. Everything it prints comes from the real modules.
 Run it:
     cd backend
     python playground.py                        # uses the defaults below
-    python playground.py "your message here"    # or pass your own
+    python playground.py test                   # or pass your own
     python playground.py "hello" 0.05           # message and noise rate
 
 Or edit the constants below and re-run.
@@ -76,6 +76,43 @@ def count_substitutions(clean, noisy):
     return sum(a != b for orig, read in zip(clean, noisy) for a, b in zip(orig, read))
 
 
+def ask(prompt, default, cast=str):
+    raw = input(f"{prompt} [{default}]: ").strip()
+    return cast(raw) if raw else default
+
+def test():
+    src = ask("source — type 'text' or 'file'", "text")
+    if src == "file":
+        path = ask("file path", "../README.md")          ## relative to backend/, or absolute
+        with open(path, "rb") as f:                      ## 'rb' = raw bytes, works for ANY file
+            msg = f.read()
+        print(f"  loaded {len(msg)} bytes from {path}")
+    else:
+        msg = ask("message", "Isaac was here").encode("utf-8")   ## payload we're sending
+
+    seed = ask("seed", 42, int)                          ## change seed → noise lands elsewhere
+    sub  = ask("sub_prob (per-base flip)", 0.02, float)
+    cov  = ask("coverage (copies per strand)", 1, int)   ## more coverage = more redundancy
+    drop = ask("drop_strand_prob (whole-strand loss)", 0.0, float)
+
+    for name, codec in (("naive", naive), ("goldman", goldman)):
+        r = roundtrip(msg, codec=codec, channel=StorageChannel(seed=seed),
+                      sub_prob=sub, coverage=cov, drop_strand_prob=drop)
+        print(f"\n{name}:  status={r.status}  ({len(r.reads)} reads from {len(r.strands)} strands)")
+        if cov == 1 and drop == 0:                        # positional diff only valid here
+            print(f"  {count_substitutions(r.strands, r.reads)} base(s) corrupted")
+        if r.error:
+            print(f"  -> crashed: {r.error}")
+        elif len(r.output) > 80:                          # a file → don't dump the bytes
+            print(f"  -> {len(r.output)} bytes | exact match: {r.output == msg}")
+        else:
+            print(f"  -> {r.output!r}")
+
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    test()
+    sys.exit()
+
+
 rule(f"1. YOUR MESSAGE  ->  {MESSAGE!r}   ({len(MESSAGE)} bytes)")
 strands = frame(MESSAGE)
 print(f"framing produced {len(strands)} strand(s) of {len(strands[0])} bytes each")
@@ -118,7 +155,6 @@ for rate in (0.0, 0.001, 0.005, 0.01, 0.02, 0.05, 0.10):
 
 
 print("\nThis table is the shape of PoC acceptance criterion 3 — the decode-success")
-print("curve. Once ECC and consensus exist, these columns should climb back up.\n")
 
 
 rule("5. TRY IT YOURSELF — paste these into a REPL")

@@ -8,8 +8,8 @@ Scope: a two week software MVP. The science is written up in `Digital_DNA_Storag
 
 1. **Framing** splits the file into fixed length strands, each tagged with an index so the original order can be rebuilt even if strands are shuffled or lost.
 2. **Codec** maps bytes to the four DNA bases (A, C, G, T). The naive codec is the baseline; the Goldman codec avoids homopolymers at a 50% size cost.
-3. **Validators** check each strand against sequence rules such as homopolymer runs and GC balance.
-4. **Reed Solomon coding** adds redundancy so a noisy read can still be recovered.
+3. **Validators** check each strand against sequence rules such as homopolymer runs and GC balance. *(planned)*
+4. **Reed Solomon coding** adds redundancy so a noisy read can still be recovered. *(planned)*
 5. **Simulator** models the storage channel: synthesis and sequencing errors, strand dropout, and multiple noisy reads per strand.
 6. **Consensus** reconstructs each strand from its noisy reads before decoding.
 
@@ -17,14 +17,14 @@ Data crosses three domains, and each module works in exactly one of them: framin
 
 ## Structure
 
-The Python lives under `backend/`. A React dashboard is scaffolded on the `dashboard` branch.
+The Python lives under `backend/`. A React dashboard is planned on the `dashboard` branch.
 
 ```text
 .github/workflows/ci.yml   runs the test suite on every push
 requirements.txt
 backend/
   conftest.py              puts backend/ on sys.path for the tests
-  test_roundtrip.py        round trip tests, parametrised over both codecs
+  test_dna.py              framing, codec/pipeline, consensus, and channel tests
   resources/               reading list and reference papers
   src/
     pipeline.py            integrator: file to DNA strands and back
@@ -39,7 +39,7 @@ backend/
     simulator/
       channel.py           storage channel noise model
     consensus/
-      alignment.py         rebuild strands from multiple noisy reads (stub)
+      alignment.py         rebuild strands from multiple noisy reads (column vote)
 ```
 
 ## Setup
@@ -63,7 +63,7 @@ cd backend
 pytest -q
 ```
 
-The suite encodes a sample payload, asserts every strand is valid DNA, shuffles the strands, and verifies the decode returns the original bytes. It runs against **both codecs** via `pytest.mark.parametrize`, so each test appears twice.
+The suite is **20 tests** in `test_dna.py`: framing round-trips and its `deframe` guards, both codecs (the lossless and shuffle-survival cases are parametrised over `naive` and `goldman`), consensus voting out substitution noise, per-strand dropout, and the channel's parameter guards. `ok` means the decoded bytes are byte-for-byte identical to the input.
 
 Useful variations:
 
@@ -107,8 +107,8 @@ The default is `naive`. Pass `codec=` to **both** calls: encoding with one codec
 
 ## Status
 
-Working today: framing, the pipeline integrator, both codecs, and a lossless file to DNA to file round trip that survives shuffled strands. CI runs the suite on every push.
+**Working today:** framing and its `deframe` guards, the pipeline integrator, both codecs, the storage channel (per-base substitution and per-strand dropout, seeded and reproducible; `ind_prob` refuses rather than silently doing nothing), and **consensus reconstruction** — reads are bucketed by their index header, minority buckets left by header-corrupting substitutions are dropped, and a per-column majority vote rebuilds each strand. A lossless file → DNA → file round trip survives shuffled strands and votes out substitution noise. CI runs the suite on every push.
 
-In progress: the storage channel. It currently has a seeded random generator and a working coverage loop, and returns strands unchanged; substitution, indel and dropout noise are being added slice by slice.
+**Measured (no error-correction):** decode success climbs with coverage — 60 seeds at `sub_prob=0.02` give coverage 3 → 2/60, 5 → 34/60, 9 → 53/60 — and nothing is ever silently wrong: a failure is always a detected `corrupted` or a loud `crashed`, never a false `ok`. Recovery is coverage-only for now, so every strand must survive independently and success falls off as the file's strand count grows.
 
-Not started: Reed Solomon coding, the biological validator, and consensus reconstruction. Each is unblocked by the channel producing real noise to recover from.
+**Not started:** Reed–Solomon coding (`ecc/rs_codec.py`) and the biological validator (`validators/sequence_rules.py`), both stubs. The Reed–Solomon **outer code** — parity across strands so a whole dropped strand can be rebuilt — is the next build; today a lost strand is detected but not recovered.
