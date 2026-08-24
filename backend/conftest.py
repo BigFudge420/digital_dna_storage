@@ -1,0 +1,1 @@
+# conftest.py — its existence puts the backend/ on sys.path so tests can `import src.*`
