@@ -46,15 +46,20 @@ def decode_rs(data_array: bytes | bytearray) -> tuple[bytes, int]:
     return bytes(decoded), len(errors)
 
 if __name__ == '__main__':
+    # 1. Original payload
     string = 'ATCCGTAGCTAGCAGT'
     data = string.encode('utf-8')
+    print(f"Original:  {data}")
 
+    # 2. Append 10 Reed-Solomon parity bytes
     encoded = encode_rs(data)
-    print(f"Encoded: {encoded}")
+    print(f"Encoded:   {encoded}")
 
+    # 3. Simulate channel error by corrupting the first byte
     corrupted = bytearray(encoded)
     corrupted[0] = ord('T')
     print(f"Corrupted: {bytes(corrupted)}")
 
+    # 4. Decode and repair the corrupted codeword
     recovered, n_errors = decode_rs(corrupted)
-    print(f"Recovered: {recovered.decode('utf-8')} ({n_errors} error fixed)")
+    print(f"Recovered: {recovered.decode('utf-8')} ({n_errors} error repaired)")
