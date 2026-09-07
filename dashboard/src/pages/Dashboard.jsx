@@ -99,12 +99,13 @@ export const Dashboard = () => {
         setStats((prev) => {
             const prevCodec = prev[codecKey] || ZERO_CODEC_STATS
             const nextFiles = prevCodec.filesProcessed + 1
-            const nextBytes = prevCodec.totalBytesProcessed + (result.inputBytes || 0)
+            const inputBytes = result.inputBytes ?? result.stats?.byteCount ?? 0
+            const nextBytes = prevCodec.totalBytesProcessed + inputBytes
             const ntCount = result.stats?.ntCount || result.dna?.length || 0
             const nextNt = prevCodec.totalNtSynthesized + ntCount
 
-            const gCount = result.stats?.baseDistribution?.find(b => b.base === 'G')?.count || 0
-            const cCount = result.stats?.baseDistribution?.find(b => b.base === 'C')?.count || 0
+            const gCount = result.stats?.baseDistribution?.find(b => b.base === 'G')?.count ?? (result.dna ? (result.dna.match(/G/g) || []).length : 0)
+            const cCount = result.stats?.baseDistribution?.find(b => b.base === 'C')?.count ?? (result.dna ? (result.dna.match(/C/g) || []).length : 0)
             const nextGc = prevCodec.totalGcCount + gCount + cCount
 
             const homo = parseInt(result.stats?.maxHomopolymer || 0, 10)
@@ -141,12 +142,16 @@ export const Dashboard = () => {
         setStats((prev) => {
             const prevCodec = prev[codecKey] || ZERO_CODEC_STATS
             const nextAttempts = prevCodec.decodeAttempts + 1
-            const nextSuccesses = prevCodec.decodeSuccesses + (result.success ? 1 : 0)
+            const isSuccess = !!result.success
+            const nextSuccesses = prevCodec.decodeSuccesses + (isSuccess ? 1 : 0)
             const nextDecodeTime = prevCodec.totalDecodeTimeMs + (result.elapsedMs || 20)
             const nextDecodeOps = prevCodec.totalDecodeOps + 1
             const decodedBytes = result.recovered_bytes || result.recoveredBytes || 0
             const nextDecodedBytes = prevCodec.totalDecodedBytes + decodedBytes
             const errorsFixed = result.errors_corrected || 0
+            const unrecoveredErrors = !isSuccess ? 1 : 0
+            const nextEncountered = prevCodec.eccErrorsEncountered + errorsFixed + unrecoveredErrors
+            const nextFixed = prevCodec.eccErrorsFixed + errorsFixed
 
             return {
                 ...prev,
@@ -157,8 +162,8 @@ export const Dashboard = () => {
                     totalDecodeTimeMs: nextDecodeTime,
                     totalDecodeOps: nextDecodeOps,
                     totalDecodedBytes: nextDecodedBytes,
-                    eccErrorsEncountered: prevCodec.eccErrorsEncountered + errorsFixed,
-                    eccErrorsFixed: prevCodec.eccErrorsFixed + errorsFixed,
+                    eccErrorsEncountered: nextEncountered,
+                    eccErrorsFixed: nextFixed,
                     lastAction: Date.now(),
                 }
             }
@@ -250,23 +255,45 @@ export const Dashboard = () => {
         ? `${Math.round((displayedStats.decodeSuccesses / displayedStats.decodeAttempts) * 100)}%`
         : "0%"
 
-    // 5. Average Encode Speed in MB/s
-    const encodeSpeedReading = displayedStats.totalEncodeTimeMs > 0 && displayedStats.totalBytesProcessed > 0
-        ? ((displayedStats.totalBytesProcessed / (1024 * 1024)) / (displayedStats.totalEncodeTimeMs / 1000)).toFixed(2)
-        : "0.00"
+    // 5. Average Encode Speed with dynamic units (KB/s vs MB/s)
+    let encodeSpeedReading = "0.00"
+    let encodeSpeedUnit = "KB/s"
+    if (displayedStats.totalEncodeTimeMs > 0 && displayedStats.totalBytesProcessed > 0) {
+        const bytesPerSec = displayedStats.totalBytesProcessed / (displayedStats.totalEncodeTimeMs / 1000)
+        if (bytesPerSec >= 1024 * 1024) {
+            encodeSpeedReading = (bytesPerSec / (1024 * 1024)).toFixed(2)
+            encodeSpeedUnit = "MB/s"
+        } else {
+            encodeSpeedReading = (bytesPerSec / 1024).toFixed(1)
+            encodeSpeedUnit = "KB/s"
+        }
+    }
 
-    // 6. Average Decode Speed in MB/s
-    const decodeSpeedReading = displayedStats.totalDecodeTimeMs > 0 && displayedStats.totalDecodedBytes > 0
-        ? ((displayedStats.totalDecodedBytes / (1024 * 1024)) / (displayedStats.totalDecodeTimeMs / 1000)).toFixed(2)
-        : "0.00"
+    // 6. Average Decode Speed with dynamic units (KB/s vs MB/s)
+    let decodeSpeedReading = "0.00"
+    let decodeSpeedUnit = "KB/s"
+    if (displayedStats.totalDecodeTimeMs > 0 && displayedStats.totalDecodedBytes > 0) {
+        const bytesPerSec = displayedStats.totalDecodedBytes / (displayedStats.totalDecodeTimeMs / 1000)
+        if (bytesPerSec >= 1024 * 1024) {
+            decodeSpeedReading = (bytesPerSec / (1024 * 1024)).toFixed(2)
+            decodeSpeedUnit = "MB/s"
+        } else {
+            decodeSpeedReading = (bytesPerSec / 1024).toFixed(1)
+            decodeSpeedUnit = "KB/s"
+        }
+    }
 
     // 7. Average GC Content (%)
     const gcContentReading = displayedStats.totalNtSynthesized > 0
         ? `${((displayedStats.totalGcCount / displayedStats.totalNtSynthesized) * 100).toFixed(1)}%`
         : "0%"
 
-    // 8. Error Recovery Rate (%)
-    const errorRecoveryRateReading = displayedStats.decodeSuccesses > 0 ? "100%" : "0%"
+    // 8. Error Recovery Rate (%) - Reed-Solomon repair fidelity
+    const errorRecoveryRateReading = displayedStats.eccErrorsEncountered > 0
+        ? `${Math.round((displayedStats.eccErrorsFixed / displayedStats.eccErrorsEncountered) * 100)}%`
+        : displayedStats.decodeSuccesses > 0
+        ? "100%"
+        : "0%"
 
     const hasAnyActivity = displayedStats.filesProcessed > 0 || displayedStats.decodeAttempts > 0
     const hasTotalActivity = (stats.naive.filesProcessed + stats.naive.decodeAttempts + 
@@ -467,7 +494,7 @@ export const Dashboard = () => {
                         colorIndex={5} 
                         title="Avg. Encode Speed" 
                         reading={encodeSpeedReading} 
-                        readingUnit="MB/s"
+                        readingUnit={encodeSpeedUnit}
                         description="Throughput of bit encoding pipeline"
                         isUpdated={hasAnyActivity}
                     />
@@ -475,7 +502,7 @@ export const Dashboard = () => {
                         colorIndex={6} 
                         title="Avg. Decode Speed" 
                         reading={decodeSpeedReading} 
-                        readingUnit="MB/s"
+                        readingUnit={decodeSpeedUnit}
                         description="Throughput of consensus alignment & RS decoding"
                         isUpdated={hasAnyActivity}
                     />

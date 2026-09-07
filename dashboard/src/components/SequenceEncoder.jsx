@@ -136,11 +136,12 @@ export const SequenceEncoder = ({ onEncode, onDecode }) => {
             }
         } catch (err) {
             console.error("Decode API call failed:", err)
-            if (onDecode) {
+            const isNetworkError = err.message.includes("Failed to fetch") || err.message.includes("NetworkError")
+            if (onDecode && !isNetworkError) {
                 onDecode({ success: false, codec, elapsedMs: Math.max(performance.now() - startTime, 1) })
             }
             setErrorMessage(
-                err.message.includes("Failed to fetch") || err.message.includes("NetworkError")
+                isNetworkError
                     ? "Could not connect to backend server. Ensure backend is running ('python main.py' at http://localhost:8000)."
                     : err.message
             )
@@ -737,7 +738,9 @@ export const SequenceEncoder = ({ onEncode, onDecode }) => {
                                         <span>Decoding Scheme:</span>
                                     </div>
                                     <span className="text-[#66D9EF] font-bold uppercase">
-                                        {decodedResult.method === "framed" ? "Framed Pipeline Strands" : "Direct Raw Codec"}
+                                        {decodedResult.method?.includes("framed") || decodedResult.method?.includes("deframe")
+                                            ? "Framed Pipeline Strands (RS First)"
+                                            : "Direct Raw Codec"}
                                     </span>
                                 </div>
                             </div>
