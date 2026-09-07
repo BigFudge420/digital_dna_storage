@@ -1,29 +1,46 @@
 import { useState } from "react"
 import colors from "../config/colors"
-import { Dna, Copy, Check, RotateCcw, ArrowRight, Sparkles, BarChart2, ShieldCheck, RefreshCw } from "lucide-react"
-
-// Fallback dummy values in case backend is offline
-const DUMMY_ENCODED_DNA = "ATCGGTACCGAATGCCTAGGCTAACGATCGATCGCTAGCTAGCATCGTAGCTA"
-
-const DUMMY_STATS = {
-    length: "54 nt",
-    density: "1.85 bits/nt",
-    ntPerByte: "4.15 nt/byte",
-    gcContent: "51.8%",
-    maxHomopolymer: "2 nt",
-    baseDistribution: [
-        { base: "A", count: 14, pct: "25.9%", color: colors.green, class: "nt-A" },
-        { base: "C", count: 14, pct: "25.9%", color: colors.cyan, class: "nt-C" },
-        { base: "G", count: 14, pct: "25.9%", color: colors.yellow, class: "nt-G" },
-        { base: "T", count: 12, pct: "22.3%", color: colors.purple, class: "nt-T" },
-    ]
-}
+import { Dna, Copy, Check, RotateCcw, ArrowRight, Sparkles, BarChart2, ShieldCheck, RefreshCw, AlertCircle } from "lucide-react"
 
 const SAMPLE_PRESETS = [
     "Isaac -> DNA -> Isaac",
     "Hello DNA Storage!",
     "Digital preservation in DNA"
 ]
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
+
+async function postJson(endpoint, body) {
+    // 1. Try relative path first (forwarded by Vite dev proxy)
+    try {
+        const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+            throw new Error(data.detail || `Server returned error (${res.status})`)
+        }
+        return data
+    } catch (err) {
+        // 2. If relative request failed due to network/no proxy, try direct backend URL
+        if (!endpoint.startsWith("http")) {
+            const fullUrl = `${API_BASE}${endpoint}`
+            const res = await fetch(fullUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            })
+            const data = await res.json().catch(() => ({}))
+            if (!res.ok) {
+                throw new Error(data.detail || `Server returned error (${res.status})`)
+            }
+            return data
+        }
+        throw err
+    }
+}
 
 export const SequenceEncoder = ({ onEncode }) => {
     const [inputText, setInputText] = useState("")
@@ -33,41 +50,31 @@ export const SequenceEncoder = ({ onEncode }) => {
     const [loading, setLoading] = useState(false)
     const [decoding, setDecoding] = useState(false)
     const [decodeResult, setDecodeResult] = useState(null)
+    const [errorMessage, setErrorMessage] = useState(null)
 
     const handleEncode = async () => {
         if (!inputText.trim()) return
         setLoading(true)
+        setErrorMessage(null)
         setDecodeResult(null)
 
         try {
-            const res = await fetch("/api/encode", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ text: inputText, codec }),
+            const data = await postJson("/api/encode", {
+                text: inputText,
+                codec: codec,
             })
 
-            if (!res.ok) {
-                throw new Error(`Server returned ${res.status}`)
-            }
-
-            const data = await res.json()
             setEncodedResult(data)
             if (onEncode) {
                 onEncode(data)
             }
         } catch (err) {
-            console.warn("Backend API not reachable, using local fallback:", err)
-            const fallbackResult = {
-                dna: DUMMY_ENCODED_DNA,
-                stats: DUMMY_STATS,
-                codec,
-                inputLength: inputText.length,
-                inputBytes: new Blob([inputText]).size
-            }
-            setEncodedResult(fallbackResult)
-            if (onEncode) {
-                onEncode(fallbackResult)
-            }
+            console.error("Encode API call failed:", err)
+            setErrorMessage(
+                err.message.includes("Failed to fetch") || err.message.includes("NetworkError")
+                    ? "Could not connect to backend server. Make sure the backend is running with 'python main.py' at http://localhost:8000."
+                    : err.message
+            )
         } finally {
             setLoading(false)
         }
@@ -76,32 +83,23 @@ export const SequenceEncoder = ({ onEncode }) => {
     const handleDecode = async () => {
         if (!encodedResult?.dna) return
         setDecoding(true)
+        setErrorMessage(null)
 
         try {
-            const res = await fetch("/api/decode", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    dna: encodedResult.dna,
-                    strands: encodedResult.strands,
-                    codec: encodedResult.codec || codec,
-                }),
+            const data = await postJson("/api/decode", {
+                dna: encodedResult.dna,
+                strands: encodedResult.strands,
+                codec: encodedResult.codec || codec,
             })
 
-            if (!res.ok) {
-                throw new Error(`Server returned ${res.status}`)
-            }
-
-            const data = await res.json()
             setDecodeResult(data)
         } catch (err) {
-            console.warn("Backend decode API error:", err)
-            setDecodeResult({
-                text: inputText || "Isaac -> DNA -> Isaac",
-                errors_corrected: 0,
-                codec,
-                status: "ok"
-            })
+            console.error("Decode API call failed:", err)
+            setErrorMessage(
+                err.message.includes("Failed to fetch") || err.message.includes("NetworkError")
+                    ? "Could not connect to backend server for decoding. Make sure 'python main.py' is running."
+                    : err.message
+            )
         } finally {
             setDecoding(false)
         }
@@ -111,11 +109,12 @@ export const SequenceEncoder = ({ onEncode }) => {
         setInputText("")
         setEncodedResult(null)
         setDecodeResult(null)
+        setErrorMessage(null)
         setCopied(false)
     }
 
     const handleCopy = () => {
-        if (!encodedResult) return
+        if (!encodedResult?.dna) return
         navigator.clipboard.writeText(encodedResult.dna)
         setCopied(true)
         setTimeout(() => setCopied(false), 2000)
@@ -155,6 +154,26 @@ export const SequenceEncoder = ({ onEncode }) => {
                 </div>
             </div>
 
+            {/* Error Notification Banner */}
+            {errorMessage && (
+                <div 
+                    style={{ backgroundColor: `${colors.pink}1a`, borderColor: colors.pink, color: colors.pink }}
+                    className="p-3.5 rounded-lg border mb-5 text-xs font-mono flex items-start gap-2.5 leading-relaxed"
+                >
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                        <strong className="block mb-0.5 font-bold">API Communication Error:</strong>
+                        <span>{errorMessage}</span>
+                    </div>
+                    <button 
+                        onClick={() => setErrorMessage(null)} 
+                        className="text-xs opacity-70 hover:opacity-100 cursor-pointer ml-2"
+                    >
+                        ✕
+                    </button>
+                </div>
+            )}
+
             {/* 2-Column Layout: Left (Input) | Right (Results & Stats) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
                 {/* Left Side: Input Text Box */}
@@ -174,7 +193,7 @@ export const SequenceEncoder = ({ onEncode }) => {
                                         borderColor: codec === "naive" ? colors.cyan : "#3E3D32",
                                         color: codec === "naive" ? colors.cyan : colors.text
                                     }}
-                                    className="p-2 rounded-lg border text-left font-mono transition-all cursor-pointer hover:border-[#66D9EF]/60"
+                                    className="p-2.5 rounded-lg border text-left font-mono transition-all cursor-pointer hover:border-[#66D9EF]/60"
                                 >
                                     <div className="text-xs font-bold flex items-center justify-between">
                                         <span>Naive (2-Bit)</span>
@@ -193,7 +212,7 @@ export const SequenceEncoder = ({ onEncode }) => {
                                         borderColor: codec === "goldman" ? colors.pink : "#3E3D32",
                                         color: codec === "goldman" ? colors.pink : colors.text
                                     }}
-                                    className="p-2 rounded-lg border text-left font-mono transition-all cursor-pointer hover:border-[#F92672]/60"
+                                    className="p-2.5 rounded-lg border text-left font-mono transition-all cursor-pointer hover:border-[#F92672]/60"
                                 >
                                     <div className="text-xs font-bold flex items-center justify-between">
                                         <span>Goldman Rotating</span>
@@ -266,7 +285,7 @@ export const SequenceEncoder = ({ onEncode }) => {
                             {loading ? (
                                 <>
                                     <RefreshCw className="w-4 h-4 animate-spin" />
-                                    <span>Synthesizing...</span>
+                                    <span>Synthesizing via /api/encode...</span>
                                 </>
                             ) : (
                                 <>
@@ -312,7 +331,7 @@ export const SequenceEncoder = ({ onEncode }) => {
                                         style={{ backgroundColor: `${colors.green}22`, color: colors.green }}
                                         className="text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase"
                                     >
-                                        {encodedResult.codec || codec} · {encodedResult.stats.length}
+                                        {encodedResult.codec || codec} · {encodedResult.stats?.length}
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -326,7 +345,7 @@ export const SequenceEncoder = ({ onEncode }) => {
                                             color: colors.purple
                                         }}
                                         className="border px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1.5 hover:brightness-125 transition-all cursor-pointer disabled:opacity-50"
-                                        title="Decode DNA and run RS Error Correction"
+                                        title="Send to /api/decode for RS Error Correction verification"
                                     >
                                         <RefreshCw className={`w-3.5 h-3.5 ${decoding ? 'animate-spin' : ''}`} />
                                         <span>{decoding ? "Decoding..." : "Decode & Verify"}</span>
@@ -351,12 +370,12 @@ export const SequenceEncoder = ({ onEncode }) => {
                             {decodeResult && (
                                 <div 
                                     style={{ backgroundColor: `${colors.green}15`, borderColor: colors.green }}
-                                    className="p-2.5 rounded border flex items-center justify-between font-mono text-xs"
+                                    className="p-2.5 rounded border flex items-center justify-between font-mono text-xs animate-fadeIn"
                                 >
                                     <div className="flex items-center gap-2">
                                         <ShieldCheck className="w-4 h-4" style={{ color: colors.green }} />
                                         <span style={{ color: colors.white }}>
-                                            Recovered: <strong style={{ color: colors.yellow }}>"{decodeResult.text}"</strong>
+                                            Decoded via /api/decode: <strong style={{ color: colors.yellow }}>"{decodeResult.text}"</strong>
                                         </span>
                                     </div>
                                     <span style={{ color: colors.green }} className="text-[10px] font-bold">
@@ -405,7 +424,7 @@ export const SequenceEncoder = ({ onEncode }) => {
                                             GC Content
                                         </span>
                                         <span style={{ color: colors.yellow }} className="font-rajdhani text-xl font-bold">
-                                            {encodedResult.stats.gcContent}
+                                            {encodedResult.stats?.gcContent}
                                         </span>
                                         <span className="text-[9px] font-mono text-[#A6E22E]">Optimal 40-60%</span>
                                     </div>
@@ -418,7 +437,7 @@ export const SequenceEncoder = ({ onEncode }) => {
                                             Density
                                         </span>
                                         <span style={{ color: colors.cyan }} className="font-rajdhani text-xl font-bold">
-                                            {encodedResult.stats.density}
+                                            {encodedResult.stats?.density}
                                         </span>
                                         <span style={{ color: colors.text }} className="text-[9px] font-mono">bits/nt</span>
                                     </div>
@@ -431,7 +450,7 @@ export const SequenceEncoder = ({ onEncode }) => {
                                             NT / Byte
                                         </span>
                                         <span style={{ color: colors.pink }} className="font-rajdhani text-xl font-bold">
-                                            {encodedResult.stats.ntPerByte}
+                                            {encodedResult.stats?.ntPerByte}
                                         </span>
                                         <span style={{ color: colors.text }} className="text-[9px] font-mono">Payload ratio</span>
                                     </div>
@@ -444,7 +463,7 @@ export const SequenceEncoder = ({ onEncode }) => {
                                             Max Repeat
                                         </span>
                                         <span style={{ color: colors.purple }} className="font-rajdhani text-xl font-bold">
-                                            {encodedResult.stats.maxHomopolymer}
+                                            {encodedResult.stats?.maxHomopolymer}
                                         </span>
                                         <span style={{ color: colors.text }} className="text-[9px] font-mono">Homopolymer</span>
                                     </div>
@@ -456,11 +475,11 @@ export const SequenceEncoder = ({ onEncode }) => {
                                 <div className="flex justify-between text-[10px] font-mono mb-1.5" style={{ color: colors.text }}>
                                     <span>Base Composition:</span>
                                     <span>
-                                        {encodedResult.stats.baseDistribution?.map(b => `${b.base}: ${b.pct}`).join(" · ") || "A: 25% · C: 25% · G: 25% · T: 25%"}
+                                        {encodedResult.stats?.baseDistribution?.map(b => `${b.base}: ${b.pct}`).join(" · ") || "A: 25% · C: 25% · G: 25% · T: 25%"}
                                     </span>
                                 </div>
                                 <div className="h-2 w-full rounded-full overflow-hidden flex">
-                                    {encodedResult.stats.baseDistribution?.map(b => (
+                                    {encodedResult.stats?.baseDistribution?.map(b => (
                                         <div 
                                             key={b.base} 
                                             style={{ width: b.pct, backgroundColor: b.color || colors.cyan }} 
@@ -490,7 +509,7 @@ export const SequenceEncoder = ({ onEncode }) => {
                                 No Encoded Sequence Yet
                             </h3>
                             <p style={{ color: colors.text }} className="text-xs font-nunito max-w-xs">
-                                Choose a codec (<strong>Naive 2-bit</strong> or <strong>Goldman</strong>), enter text, and click <span style={{ color: colors.pink }}>"Encode"</span>. Results are protected by Reed-Solomon ECC.
+                                Choose a codec (<strong>Naive 2-bit</strong> or <strong>Goldman</strong>), enter text, and click <span style={{ color: colors.pink }}>"Encode"</span> to call the backend API with Reed-Solomon protection.
                             </p>
                         </div>
                     )}

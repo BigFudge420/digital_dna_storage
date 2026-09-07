@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
 const codecs = [
     {label : "Goldman", value : "goldman"},
@@ -17,8 +17,22 @@ const codecs = [
 
 
 const Navbar = () => {
-    const [active, setActive] = useState(true)
+    const [active, setActive] = useState(false)
     const [codec, setCodec] = useState('naive')
+
+    useEffect(() => {
+        const checkBackend = async () => {
+            try {
+                const res = await fetch("/api/health").catch(() => fetch("http://localhost:8000/api/health"))
+                setActive(Boolean(res && res.ok))
+            } catch {
+                setActive(false)
+            }
+        }
+        checkBackend()
+        const interval = setInterval(checkBackend, 5000)
+        return () => clearInterval(interval)
+    }, [])
     
     return (
         <div style={{backgroundColor : colors.bg, borderBottomColor : colors.borderStrong}} className="p-4 border-b-2 flex justify-between items-center">
