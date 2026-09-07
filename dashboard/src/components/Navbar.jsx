@@ -1,24 +1,9 @@
 import colors from "../config/colors"
-import {Dna} from 'lucide-react'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Dna } from 'lucide-react'
 import { useState, useEffect } from "react"
-
-const codecs = [
-    {label : "Goldman", value : "goldman"},
-    {label : "Naive", value : "naive"}
-]
-
 
 const Navbar = () => {
     const [active, setActive] = useState(false)
-    const [codec, setCodec] = useState('naive')
 
     useEffect(() => {
         const checkBackend = async () => {
@@ -44,23 +29,9 @@ const Navbar = () => {
                 </div>
             </div>
             <div className="flex">
-                <div style={{backgroundColor : active ? colors.emerald + '1a': colors.red +'1a', borderColor : active ? colors.emerald : colors.red}} className="border-2 mx-4 px-1 flex items-center rounded-md">
-                    <span style={{color : active ? colors.emerald : colors.red}} className="uppercase text-xs font-nunito">{active ? 'Active' : 'Inactive'}</span>
+                <div style={{backgroundColor : active ? colors.emerald + '1a': colors.red +'1a', borderColor : active ? colors.emerald : colors.red}} className="border-2 px-2.5 py-1 flex items-center rounded-md">
+                    <span style={{color : active ? colors.emerald : colors.red}} className="uppercase text-xs font-nunito font-semibold tracking-wider">{active ? 'Active' : 'Inactive'}</span>
                 </div>
-                <Select items={codecs} value={codec} onValueChange={setCodec}>
-                    <SelectTrigger className="w-45">
-                        <SelectValue placeholder="Codec"/>
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectGroup>
-                            {codecs.map((codec) => 
-                                (<SelectItem key={codec.value} value={codec.value}>
-                                    {codec.label}
-                                </SelectItem>)
-                            )}
-                        </SelectGroup>
-                    </SelectContent>
-                </Select>
             </div>
         </div>
     )
