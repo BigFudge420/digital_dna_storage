@@ -187,67 +187,100 @@ def encode_endpoint(req: EncodeRequest):
 @app.post("/api/decode")
 def decode_endpoint(req: DecodeRequest):
     """
-    Decode DNA sequence back to text.
-    Pipeline: DNA Strands -> DNA Codec (Naive / Goldman) -> Deframe -> Reed-Solomon ECC Correction -> UTF-8 Text.
+    Decode a user-provided DNA sequence back to original text with Reed-Solomon error correction.
+    Supports both framed pipeline strands and direct raw nucleotide sequences.
     """
     codec_module = goldman if req.codec == "goldman" else naive
 
-    # Determine strands list
-    strands = req.strands
-    if not strands:
-        if not req.dna:
+    # 1. Gather DNA string or strands
+    dna_input = req.dna
+    if req.strands:
+        dna_input = "".join(req.strands)
+    elif not dna_input:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either 'dna' string or 'strands' array must be provided.",
+        )
+
+    # Clean whitespace and enforce uppercase
+    dna_clean = "".join(dna_input.split()).upper()
+    if not dna_clean:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provided DNA sequence is empty.",
+        )
+
+    # Validate nucleotide alphabet
+    invalid_bases = set(dna_clean) - {"A", "C", "G", "T"}
+    if invalid_bases:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid nucleotide characters detected: {sorted(list(invalid_bases))}. Only A, C, G, T are valid.",
+        )
+
+    original_bytes = None
+    errors_corrected = 0
+    decoding_method = "framed"
+
+    # Strategy A: If explicitly passed as strands, use pipeline decode
+    if req.strands:
+        try:
+            recovered_rs = pipeline_decode(req.strands, codec=codec_module)
+            original_bytes, errors_corrected = decode_rs(recovered_rs)
+        except Exception as e:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Either 'dna' string or 'strands' array must be provided.",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Decoding strands failed: {str(e)}",
             )
-        # Calculate strand nucleotide length from framed byte length
+    else:
+        # Strategy B: Try framed pipeline chunks first
         strand_bytes = INDEX_SIZE + req.payload_len
         nt_per_byte = 6 if req.codec == "goldman" else 4
         strand_nt_len = strand_bytes * nt_per_byte
 
-        dna_clean = req.dna.strip().upper()
-        if len(dna_clean) % strand_nt_len != 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"DNA length ({len(dna_clean)} nt) is not a multiple of expected strand "
-                    f"length ({strand_nt_len} nt for {req.codec} codec)."
-                ),
-            )
-        strands = [
-            dna_clean[i : i + strand_nt_len]
-            for i in range(0, len(dna_clean), strand_nt_len)
-        ]
+        if len(dna_clean) % strand_nt_len == 0:
+            try:
+                candidate_strands = [
+                    dna_clean[i : i + strand_nt_len]
+                    for i in range(0, len(dna_clean), strand_nt_len)
+                ]
+                recovered_rs = pipeline_decode(candidate_strands, codec=codec_module)
+                original_bytes, errors_corrected = decode_rs(recovered_rs)
+                decoding_method = "framed"
+            except Exception:
+                original_bytes = None
 
-    try:
-        # Step 1: Decode DNA through consensus/deframe pipeline to recover RS-protected bytes
-        recovered_rs_bytes = pipeline_decode(strands, codec=codec_module)
+        # Strategy C: If framed decode did not match, try direct raw codec decode
+        if original_bytes is None:
+            try:
+                raw_rs_bytes = codec_module.decode(dna_clean)
+                original_bytes, errors_corrected = decode_rs(raw_rs_bytes)
+                decoding_method = "direct"
+            except ReedSolomonError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Reed-Solomon ECC failure (too many corrupted bytes to recover): {str(e)}",
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Decoding failed for {req.codec} codec: {str(e)}",
+                )
 
-        # Step 2: Reed-Solomon Error Correction (repairs corrupted bytes and removes parity)
-        original_bytes, errors_corrected = decode_rs(recovered_rs_bytes)
+    # Decode recovered bytes as UTF-8 string
+    text = original_bytes.decode("utf-8", errors="replace")
 
-        # Step 3: Decode UTF-8 string
-        text = original_bytes.decode("utf-8", errors="replace")
+    # Compute quick stats on input DNA
+    gc_count = dna_clean.count("G") + dna_clean.count("C")
+    gc_pct = f"{(gc_count / len(dna_clean) * 100):.1f}%"
 
-        return {
-            "text": text,
-            "errors_corrected": errors_corrected,
-            "codec": req.codec,
-            "status": "ok",
-            "recovered_bytes": len(original_bytes),
-        }
-    except ReedSolomonError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Reed-Solomon ECC failure (too many corrupted bytes to recover): {str(e)}",
-        )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"De-framing or codec error: {str(e)}",
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Decoding failed: {str(e)}",
-        )
+    return {
+        "text": text,
+        "errors_corrected": errors_corrected,
+        "codec": req.codec,
+        "status": "ok",
+        "nt_length": len(dna_clean),
+        "gc_content": gc_pct,
+        "method": decoding_method,
+        "recovered_bytes": len(original_bytes),
+    }
