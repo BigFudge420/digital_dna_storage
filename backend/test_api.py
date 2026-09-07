@@ -49,6 +49,7 @@ def test_goldman_has_zero_homopolymers():
     dna = enc["dna"]
     for i in range(1, len(dna)):
         assert dna[i] != dna[i - 1], f"Homopolymer found at index {i}: {dna[i-1]}{dna[i]}"
+    assert enc["stats"]["maxHomopolymer"] == "0 nt"
 
 
 def test_decode_corrects_byte_corruptions_via_rs():

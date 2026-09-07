@@ -70,8 +70,8 @@ def compute_dna_stats(raw_bytes: bytes, strands: list[str]) -> dict:
     density = (byte_count * 8 / nt_count) if nt_count else 0.0
     nt_per_byte = (nt_count / byte_count) if byte_count else 0.0
 
-    # Calculate longest homopolymer repeat run
-    max_homopolymer = 1
+    # Calculate longest homopolymer repeat run (0 if no consecutive identical bases occur)
+    max_homopolymer = 0
     current_run = 1
     for i in range(1, len(full_dna)):
         if full_dna[i] == full_dna[i - 1]:

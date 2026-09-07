@@ -102,7 +102,7 @@ export const SequenceEncoder = ({ onEncode, onDecode }) => {
 
             setEncodedResult(data)
             if (onEncode) {
-                onEncode({ ...data, elapsedMs })
+                onEncode({ ...data, codec: data.codec || codec, elapsedMs })
             }
         } catch (err) {
             console.error("Encode API call failed:", err)
@@ -132,12 +132,12 @@ export const SequenceEncoder = ({ onEncode, onDecode }) => {
 
             setDecodedResult(data)
             if (onDecode) {
-                onDecode({ ...data, success: true, elapsedMs })
+                onDecode({ ...data, codec: data.codec || codec, success: true, elapsedMs })
             }
         } catch (err) {
             console.error("Decode API call failed:", err)
             if (onDecode) {
-                onDecode({ success: false, elapsedMs: Math.max(performance.now() - startTime, 1) })
+                onDecode({ success: false, codec, elapsedMs: Math.max(performance.now() - startTime, 1) })
             }
             setErrorMessage(
                 err.message.includes("Failed to fetch") || err.message.includes("NetworkError")
