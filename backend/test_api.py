@@ -52,15 +52,43 @@ def test_goldman_has_zero_homopolymers():
     assert enc["stats"]["maxHomopolymer"] == "0 nt"
 
 
-def test_decode_corrects_byte_corruptions_via_rs():
+def test_decode_clean_strands():
     text = "Short payload for ECC test"
     enc = encode_endpoint(EncodeRequest(text=text, codec="naive"))
     strands = enc["strands"]
 
-    # Decode without errors
+    # Decode clean strands without errors
     dec = decode_endpoint(DecodeRequest(strands=strands, codec="naive"))
     assert dec["text"] == text
     assert dec["errors_corrected"] == 0
+
+
+def test_decode_corrects_byte_corruptions_via_rs():
+    text = "Short payload for ECC test"
+    enc = encode_endpoint(EncodeRequest(text=text, codec="naive"))
+    dna = enc["dna"]
+
+    # Corrupt character at index 0 (inside header)
+    corrupted_dna = ("C" if dna[0] != "C" else "G") + dna[1:]
+    dec = decode_endpoint(DecodeRequest(dna=corrupted_dna, codec="naive"))
+    assert dec["text"] == text
+    assert dec["errors_corrected"] >= 1
+    assert dec["status"] == "ok"
+
+
+def test_goldman_error_recovery_with_homopolymer_noise():
+    text = "Goldman noise recovery test"
+    enc = encode_endpoint(EncodeRequest(text=text, codec="goldman"))
+    dna = enc["dna"]
+
+    # Mutate index 0 to match index 1 (creating an identical adjacent CC repeat)
+    mutated_dna = dna[1] + dna[1:]
+    assert mutated_dna[0] == mutated_dna[1]
+
+    dec = decode_endpoint(DecodeRequest(dna=mutated_dna, codec="goldman"))
+    assert dec["text"] == text
+    assert dec["errors_corrected"] >= 1
+    assert dec["status"] == "ok"
 
 
 def test_empty_text_raises_validation_error():

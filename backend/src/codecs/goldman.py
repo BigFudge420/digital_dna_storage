@@ -64,11 +64,10 @@ def decode(dna_sequence: str) -> bytes:
         ValueError: If sequence length is not a multiple of 6 or starts with an invalid character.
     """
     # Each byte maps to 6 nucleotides (6 trits)
-    if len(dna_sequence) % 6 != 0:
-        raise ValueError("Seq. length must be a multiple of 6!")
-    # Valid first trit mapped bases can only be A, C, or G (indices 0, 1, 2)
-    if dna_sequence and dna_sequence[0] == 'T':
-        raise ValueError("Seq. cannot start with a 'T'")
+    valid_len = (len(dna_sequence) // 6) * 6
+    if valid_len == 0:
+        return b""
+    dna = dna_sequence.upper()[:valid_len]
     
     # State tracking for previous nucleotide
     prev: str | None = None
@@ -76,8 +75,11 @@ def decode(dna_sequence: str) -> bytes:
     TRITS: list[str] = []
 
     # Iterate through uppercase nucleotide characters
-    for nucl in dna_sequence.upper():
-        if prev == None:
+    for nucl in dna:
+        if nucl not in NUCLEOTIDES:
+            nucl = "A"
+
+        if prev is None:
             # Reconstruct first trit index from initial base
             trit: int = 2 if nucl == 'T' else NUCLEOTIDES.index(nucl)
         else: 
@@ -85,8 +87,13 @@ def decode(dna_sequence: str) -> bytes:
             temp: list[str] = NUCLEOTIDES.copy()
             temp.remove(prev)
 
-            # Look up trit index from remaining candidates
-            trit = temp.index(nucl)
+            if nucl in temp:
+                # Look up trit index from remaining candidates
+                trit = temp.index(nucl)
+            else:
+                # User mutation introduced an illegal consecutive repeat (nucl == prev).
+                # Emit fallback trit so decoding does not crash, allowing Reed-Solomon to correct it.
+                trit = 0
 
         TRITS.append(str(trit))
         # Update state for next iteration
@@ -126,21 +133,20 @@ def convert_from_ternary(trits: str) -> bytes:
 
     Returns:
         bytes: Recovered raw byte stream.
-
-    Raises:
-        ValueError: If trit sequence length is not a multiple of 6.
     """
-    # Verify exact 6-trit block structure
-    if len(trits) % 6 != 0: 
-        raise ValueError("Ternary length must be a multiple of 6") 
+    valid_len = (len(trits) // 6) * 6
+    if valid_len == 0:
+        return b""
 
     decoded: bytearray = bytearray() 
 
     # Process trits in 6-character chunks corresponding to 1 byte each
-    for i in range(0, len(trits), 6): 
+    for i in range(0, valid_len, 6): 
         chunk: str = trits[i:i+6] 
         # Parse base-3 chunk string into byte integer
-        decoded.append(int(chunk, 3)) 
+        # Wrap modulo 256 if noise causes chunk >= 256 so bytearray doesn't raise ValueError
+        val = int(chunk, 3) % 256
+        decoded.append(val) 
 
     return bytes(decoded)
 

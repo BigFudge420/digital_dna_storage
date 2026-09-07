@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from src.codecs import naive, goldman
 from src.ecc import encode_rs, decode_rs, ReedSolomonError
-from src.framing import INDEX_SIZE
+from src.framing import frame, deframe, INDEX_SIZE, LENGTH_FMT, LENGTH_SIZE
 from src.pipeline import encode as pipeline_encode, decode as pipeline_decode
 
 app = FastAPI(
@@ -149,24 +149,25 @@ def health_check():
 def encode_endpoint(req: EncodeRequest):
     """
     Encode text payload to DNA.
-    Pipeline: Raw Text -> UTF-8 Bytes -> Reed-Solomon ECC -> Framing -> DNA Codec (Naive / Goldman).
+    Pipeline: Raw Text -> Frame into Indexed Strands -> Reed-Solomon per Strand -> DNA Codec (Naive / Goldman).
     """
     try:
         raw_bytes = req.text.encode("utf-8")
 
-        # Step 1: Reed-Solomon Error Correction Outer Code (adds 10 parity bytes)
-        rs_protected_bytes = encode_rs(raw_bytes)
+        # Step 1: Frame first (chops payload into indexed chunks with length header)
+        framed_strands = frame(raw_bytes, payload_len=req.payload_len)
 
-        # Step 2: Choose DNA codec
+        # Step 2: Reed-Solomon Error Correction per strand (protects entire strand: index + length + payload)
+        rs_strands = [encode_rs(strand) for strand in framed_strands]
+
+        # Step 3: Choose DNA codec
         codec_module = goldman if req.codec == "goldman" else naive
 
-        # Step 3: Frame and encode into DNA strands
-        strands = pipeline_encode(
-            rs_protected_bytes, payload_len=req.payload_len, codec=codec_module
-        )
+        # Step 4: Encode RS-protected strands to DNA
+        strands = [codec_module.encode(rs_s) for rs_s in rs_strands]
         full_dna = "".join(strands)
 
-        # Step 4: Calculate sequence stats
+        # Step 5: Calculate sequence stats
         stats = compute_dna_stats(raw_bytes, strands)
 
         return {
@@ -188,7 +189,7 @@ def encode_endpoint(req: EncodeRequest):
 def decode_endpoint(req: DecodeRequest):
     """
     Decode a user-provided DNA sequence back to original text with Reed-Solomon error correction.
-    Supports both framed pipeline strands and direct raw nucleotide sequences.
+    Pipeline: DNA -> Codec Decode -> Reed-Solomon Repair FIRST -> Deframe SECOND.
     """
     codec_module = goldman if req.codec == "goldman" else naive
 
@@ -220,52 +221,78 @@ def decode_endpoint(req: DecodeRequest):
 
     original_bytes = None
     errors_corrected = 0
-    decoding_method = "framed"
+    decoding_method = "rs_first_then_deframe"
 
-    # Strategy A: If explicitly passed as strands, use pipeline decode
-    if req.strands:
+    # Strand geometry: INDEX_SIZE (2) + payload_len (32) + 10 RS parity bytes = 44 bytes
+    strand_bytes = INDEX_SIZE + req.payload_len + 10
+    nt_per_byte = 6 if req.codec == "goldman" else 4
+    strand_nt_len = strand_bytes * nt_per_byte
+
+    # Strategy 1: Framed strands with Reed-Solomon FIRST, then deframe SECOND
+    strands_dna = req.strands
+    if not strands_dna and len(dna_clean) >= strand_nt_len and len(dna_clean) % strand_nt_len == 0:
+        strands_dna = [
+            dna_clean[i : i + strand_nt_len]
+            for i in range(0, len(dna_clean), strand_nt_len)
+        ]
+
+    if strands_dna:
         try:
-            recovered_rs = pipeline_decode(req.strands, codec=codec_module)
-            original_bytes, errors_corrected = decode_rs(recovered_rs)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Decoding strands failed: {str(e)}",
-            )
-    else:
-        # Strategy B: Try framed pipeline chunks first
-        strand_bytes = INDEX_SIZE + req.payload_len
-        nt_per_byte = 6 if req.codec == "goldman" else 4
-        strand_nt_len = strand_bytes * nt_per_byte
+            clean_strands = []
+            errors_acc = 0
+            for s_dna in strands_dna:
+                raw_strand_bytes = codec_module.decode(s_dna)
+                # 1. Reed-Solomon FIRST: corrects any corrupted index, length, or payload bytes
+                clean_strand, n_errs = decode_rs(raw_strand_bytes)
+                clean_strands.append(clean_strand)
+                errors_acc += n_errs
 
-        if len(dna_clean) % strand_nt_len == 0:
+            # 2. Deframe SECOND: reassembles the clean strands in index order
+            original_bytes = deframe(clean_strands)
+            errors_corrected = errors_acc
+            decoding_method = "rs_first_then_deframe"
+        except Exception:
+            original_bytes = None
+
+    # Strategy 2: Direct raw sequence (for un-framed sequences, presets, or single RS codewords)
+    if original_bytes is None:
+        try:
+            raw_bytes = codec_module.decode(dna_clean)
+            clean_bytes, n_errs = decode_rs(raw_bytes)
+            # Check if clean_bytes happens to be a framed strand
+            if len(clean_bytes) >= INDEX_SIZE + LENGTH_SIZE:
+                try:
+                    original_bytes = deframe([clean_bytes])
+                except Exception:
+                    original_bytes = clean_bytes
+            else:
+                original_bytes = clean_bytes
+            errors_corrected = n_errs
+            decoding_method = "direct_rs"
+        except Exception:
+            pass
+
+    # Strategy 3: Legacy fallback (for sequences encoded with legacy framing order: RS inside body)
+    if original_bytes is None:
+        legacy_strand_bytes = INDEX_SIZE + req.payload_len
+        legacy_nt_len = legacy_strand_bytes * nt_per_byte
+        if len(dna_clean) % legacy_nt_len == 0:
             try:
                 candidate_strands = [
-                    dna_clean[i : i + strand_nt_len]
-                    for i in range(0, len(dna_clean), strand_nt_len)
+                    dna_clean[i : i + legacy_nt_len]
+                    for i in range(0, len(dna_clean), legacy_nt_len)
                 ]
                 recovered_rs = pipeline_decode(candidate_strands, codec=codec_module)
                 original_bytes, errors_corrected = decode_rs(recovered_rs)
-                decoding_method = "framed"
+                decoding_method = "legacy_framed"
             except Exception:
-                original_bytes = None
+                pass
 
-        # Strategy C: If framed decode did not match, try direct raw codec decode
-        if original_bytes is None:
-            try:
-                raw_rs_bytes = codec_module.decode(dna_clean)
-                original_bytes, errors_corrected = decode_rs(raw_rs_bytes)
-                decoding_method = "direct"
-            except ReedSolomonError as e:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail=f"Reed-Solomon ECC failure (too many corrupted bytes to recover): {str(e)}",
-                )
-            except Exception as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Decoding failed for {req.codec} codec: {str(e)}",
-                )
+    if original_bytes is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Reed-Solomon ECC failure: Could not reconstruct sequence. Either too many errors were introduced (exceeded RS capacity of 5 corrupted bytes per strand), or incompatible codec.",
+        )
 
     # Decode recovered bytes as UTF-8 string
     text = original_bytes.decode("utf-8", errors="replace")
