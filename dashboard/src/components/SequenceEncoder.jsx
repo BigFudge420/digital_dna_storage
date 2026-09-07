@@ -63,7 +63,7 @@ async function postJson(endpoint, body) {
     }
 }
 
-export const SequenceEncoder = ({ onEncode }) => {
+export const SequenceEncoder = ({ onEncode, onDecode }) => {
     // Mode: "encode" (Text -> DNA) or "decode" (DNA -> Text)
     const [mode, setMode] = useState("encode")
 
@@ -91,16 +91,18 @@ export const SequenceEncoder = ({ onEncode }) => {
         if (!inputText.trim()) return
         setLoading(true)
         setErrorMessage(null)
+        const startTime = performance.now()
 
         try {
             const data = await postJson("/api/encode", {
                 text: inputText,
                 codec: codec,
             })
+            const elapsedMs = Math.max(performance.now() - startTime, 1)
 
             setEncodedResult(data)
             if (onEncode) {
-                onEncode(data)
+                onEncode({ ...data, elapsedMs })
             }
         } catch (err) {
             console.error("Encode API call failed:", err)
@@ -119,16 +121,24 @@ export const SequenceEncoder = ({ onEncode }) => {
         if (!cleanDnaInput) return
         setLoading(true)
         setErrorMessage(null)
+        const startTime = performance.now()
 
         try {
             const data = await postJson("/api/decode", {
                 dna: cleanDnaInput,
                 codec: codec,
             })
+            const elapsedMs = Math.max(performance.now() - startTime, 1)
 
             setDecodedResult(data)
+            if (onDecode) {
+                onDecode({ ...data, success: true, elapsedMs })
+            }
         } catch (err) {
             console.error("Decode API call failed:", err)
+            if (onDecode) {
+                onDecode({ success: false, elapsedMs: Math.max(performance.now() - startTime, 1) })
+            }
             setErrorMessage(
                 err.message.includes("Failed to fetch") || err.message.includes("NetworkError")
                     ? "Could not connect to backend server. Ensure backend is running ('python main.py' at http://localhost:8000)."
